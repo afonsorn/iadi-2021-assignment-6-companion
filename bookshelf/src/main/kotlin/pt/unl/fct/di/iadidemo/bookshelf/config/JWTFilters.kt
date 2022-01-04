@@ -6,6 +6,8 @@ import io.jsonwebtoken.SignatureAlgorithm
 import org.springframework.security.authentication.AuthenticationManager
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.Authentication
+import org.springframework.security.core.GrantedAuthority
+import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.core.context.SecurityContextHolder
 import org.springframework.security.web.authentication.AbstractAuthenticationProcessingFilter
 import org.springframework.web.filter.GenericFilterBean
@@ -17,7 +19,9 @@ import javax.servlet.ServletRequest
 import javax.servlet.ServletResponse
 import javax.servlet.http.HttpServletRequest
 import javax.servlet.http.HttpServletResponse
+import kotlin.collections.ArrayList
 import kotlin.collections.HashMap
+import kotlin.collections.LinkedHashMap
 
 object JWTSecret {
     private const val passphrase = "este é um grande segredo que tem que ser mantido escondido"
@@ -30,6 +34,7 @@ private fun addResponseToken(authentication: Authentication, response: HttpServl
 
     val claims = HashMap<String, Any?>()
     claims["username"] = authentication.name
+    claims["roles"] = authentication.authorities
 
     val token = Jwts
             .builder()
@@ -74,9 +79,9 @@ class UserPasswordAuthenticationFilterToJWT (
     }
 }
 
-class UserAuthToken(private var login:String) : Authentication {
+class UserAuthToken(private var login:String, private var roles: MutableList<out GrantedAuthority>) : Authentication {
 
-    override fun getAuthorities() = null
+    override fun getAuthorities() = roles
 
     override fun setAuthenticated(isAuthenticated: Boolean) {}
 
@@ -113,7 +118,14 @@ class JWTAuthenticationFilter: GenericFilterBean() {
 
             else {
 
-                val authentication = UserAuthToken(claims["username"] as String)
+                val roles = claims["roles"] as ArrayList<*>
+
+                val authentication = UserAuthToken(
+                        claims["username"] as String,
+                        roles.map {
+                            SimpleGrantedAuthority( (it as LinkedHashMap<*, *>)["authority"] as String )
+                        }.toMutableList()
+                )
                 // Can go to the database to get the actual user information (e.g. authorities)
 
                 SecurityContextHolder.getContext().authentication = authentication
@@ -157,11 +169,11 @@ class UserPasswordSignUpFilterToJWT (
                 .addUser(user)
                 .orElse( null )
                 .let {
-                    val auth = UserAuthToken(user.username)
+                    val auth = UserAuthToken(user.username, user.roles.map { SimpleGrantedAuthority("ROLE_${it.tag}") }.toMutableList())
                     SecurityContextHolder.getContext().authentication = auth
                     auth
                 }
-        }
+    }
 
     override fun successfulAuthentication(request: HttpServletRequest,
                                           response: HttpServletResponse,
